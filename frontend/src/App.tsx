@@ -12,6 +12,11 @@ import {
   Info, 
   ShieldCheck, 
   AlertTriangle, 
+  RefreshCw,
+  Cpu,
+  CheckCircle2,
+  ChevronDown,
+  Radio,
   X
 } from 'lucide-react'
 import TwinScene, { type Telemetry } from './components/TwinScene'
@@ -39,11 +44,83 @@ export default function App() {
   const [simTemp, setSimTemp] = useState<number>(4.6)
   const [simVolt, setSimVolt] = useState<number>(11.85)
   const [showInfoModal, setShowInfoModal] = useState<boolean>(false)
+  const [showDeviceModal, setShowDeviceModal] = useState<boolean>(false)
+  const [deviceIpInput, setDeviceIpInput] = useState<string>("192.168.31.173")
+  const [isScanning, setIsScanning] = useState<boolean>(false)
+  const [connectSuccessMsg, setConnectSuccessMsg] = useState<string>("")
+  const [discoveredDevices, setDiscoveredDevices] = useState<{
+    ip: string
+    name: string
+    status: string
+    type?: string
+    signal?: string
+    mac?: string
+  }[]>([
+    {
+      ip: "192.168.31.173",
+      name: "ESP32-S3 ColdTwin (Primary Prototype)",
+      status: "ONLINE",
+      type: "ESP32-S3",
+      signal: "-52 dBm",
+      mac: "E8:6B:EA:D4:31:AC"
+    },
+    {
+      ip: "192.168.1.50",
+      name: "ESP32 Lab Bench Controller",
+      status: "ONLINE",
+      type: "ESP32-WROOM-32",
+      signal: "-64 dBm",
+      mac: "24:6F:28:B2:91:F0"
+    }
+  ])
   const [lastPacketTime, setLastPacketTime] = useState<number>(Date.now())
   const [packetCount, setPacketCount] = useState<number>(0)
   
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<any>(null)
+
+  const handleScanDevices = () => {
+    setIsScanning(true)
+    fetch('http://localhost:3001/api/scan-devices')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.devices && data.devices.length > 0) {
+          setDiscoveredDevices(data.devices)
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setTimeout(() => setIsScanning(false), 800)
+      })
+  }
+
+  const handleSelectDevice = (ip: string, name?: string) => {
+    setDeviceIpInput(ip)
+    setTelemetry(prev => ({ ...prev, device_ip: ip }))
+    
+    // Notify backend
+    fetch('http://localhost:3001/api/set-device', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, name })
+    }).catch(() => {})
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ action: 'SET_DEVICE_IP', ip }))
+    }
+
+    setConnectSuccessMsg(`Connected to ${ip}!`)
+    setTimeout(() => {
+      setConnectSuccessMsg("")
+      setShowDeviceModal(false)
+    }, 1200)
+  }
+
+  const handleManualConnect = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!deviceIpInput.trim()) return
+    handleSelectDevice(deviceIpInput.trim(), `ESP32 (${deviceIpInput.trim()})`)
+  }
 
   // ----------------------------------------------------
   // REAL-TIME WEBSOCKET & HTTP TELEMETRY CLIENT
@@ -212,21 +289,28 @@ export default function App() {
         {/* Live Hardware Connection & Mode Toggles */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', pointerEvents: 'auto' }}>
           
-          {/* Hardware Connection Indicator */}
-          <div className="glass-panel" style={{ 
-            padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '10px' 
-          }}>
+          {/* Interactive Hardware Connection & Device Selector Button */}
+          <button
+            onClick={() => {
+              setShowDeviceModal(true)
+              handleScanDevices()
+            }}
+            className="glass-panel"
+            style={{ 
+              padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '10px',
+              cursor: 'pointer', border: '1px solid var(--border-subtle)', background: 'var(--bg-panel)',
+              color: 'var(--text-primary)', transition: 'all 0.2s ease'
+            }}
+            title="Click to scan network or enter ESP32 IP address"
+          >
             <span className={`live-beacon ${connectionStatus !== 'CONNECTED' ? (connectionStatus === 'CONNECTING' ? 'warning' : 'disconnected') : ''}`} />
-            <div style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)' }}>
-              {connectionStatus === 'CONNECTED' ? (
-                <span style={{ color: 'var(--color-safe)' }}>LIVE WS: {telemetry.device_ip}</span>
-              ) : connectionStatus === 'CONNECTING' ? (
-                <span style={{ color: 'var(--color-warning)' }}>SEARCHING HARDWARE...</span>
-              ) : (
-                <span style={{ color: 'var(--color-danger)' }}>OFFLINE (SIM BUFFER)</span>
-              )}
+            <div style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ color: connectionStatus === 'CONNECTED' ? 'var(--color-safe)' : 'var(--color-warning)' }}>
+                ESP32: {telemetry.device_ip}
+              </span>
+              <ChevronDown size={14} color="#94a3b8" />
             </div>
-          </div>
+          </button>
 
           {/* Mode Switcher: Live Stream vs Simulator */}
           <div className="glass-panel" style={{ padding: '4px', display: 'flex', gap: '4px' }}>
@@ -685,6 +769,225 @@ export default function App() {
             >
               Resume Telemetry Monitoring
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* ESP32 DEVICE SCANNER & IP INPUT MODAL               */}
+      {/* ---------------------------------------------------- */}
+      {showDeviceModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+          backgroundColor: 'rgba(5, 7, 10, 0.85)', backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 100, padding: '20px'
+        }}>
+          <div className="glass-panel" style={{
+            maxWidth: '580px', width: '100%', padding: '26px',
+            backgroundColor: '#0d1117', border: '1px solid var(--border-light)',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.85)', maxHeight: '90vh', overflowY: 'auto'
+          }}>
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Cpu size={18} color="var(--color-safe)" />
+                  <span style={{ fontSize: '0.7rem', color: 'var(--color-safe)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    Hardware Telemetry Link
+                  </span>
+                </div>
+                <h2 style={{ fontSize: '1.35rem', fontWeight: 800, marginTop: '2px', color: '#f8fafc' }}>
+                  Connect ESP32 Controller
+                </h2>
+              </div>
+              <button 
+                onClick={() => setShowDeviceModal(false)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {connectSuccessMsg && (
+              <div style={{
+                background: 'rgba(0, 245, 160, 0.12)', border: '1px solid rgba(0, 245, 160, 0.4)',
+                borderRadius: '8px', padding: '10px 14px', marginBottom: '16px',
+                display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-safe)',
+                fontSize: '0.8rem', fontWeight: 600
+              }}>
+                <CheckCircle2 size={16} /> {connectSuccessMsg}
+              </div>
+            )}
+
+            {/* Part 1: Manual IP Input Field */}
+            <form onSubmit={handleManualConnect} style={{ marginBottom: '20px' }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                Enter ESP32 IP Address or Hostname
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={deviceIpInput}
+                  onChange={(e) => setDeviceIpInput(e.target.value)}
+                  placeholder="e.g. 192.168.31.173 or 192.168.1.50"
+                  style={{
+                    flex: 1, padding: '10px 14px',
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid var(--border-light)',
+                    borderRadius: '8px', color: '#fff',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '0.85rem'
+                  }}
+                />
+                <button
+                  type="submit"
+                  style={{
+                    padding: '10px 18px', background: 'var(--color-safe)',
+                    color: '#060709', border: 'none', borderRadius: '8px',
+                    fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: '6px'
+                  }}
+                >
+                  <Radio size={14} /> Connect
+                </button>
+              </div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '6px' }}>
+                Active Target: <strong style={{ color: '#fff', fontFamily: 'monospace' }}>{telemetry.device_ip}</strong> (Live on 3D OLED screen)
+              </div>
+            </form>
+
+            {/* Quick Presets */}
+            <div style={{ marginBottom: '22px' }}>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Quick Presets
+              </div>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {[
+                  { ip: '192.168.31.173', label: '192.168.31.173 (Prototype Rig)' },
+                  { ip: '192.168.1.50', label: '192.168.1.50 (Lab Bench)' },
+                  { ip: '10.160.121.83', label: '10.160.121.83 (Local Host)' }
+                ].map(p => (
+                  <button
+                    key={p.ip}
+                    type="button"
+                    onClick={() => handleSelectDevice(p.ip, p.label)}
+                    style={{
+                      background: telemetry.device_ip === p.ip ? 'rgba(0, 245, 160, 0.15)' : 'rgba(255, 255, 255, 0.04)',
+                      border: telemetry.device_ip === p.ip ? '1px solid var(--color-safe)' : '1px solid var(--border-subtle)',
+                      color: telemetry.device_ip === p.ip ? 'var(--color-safe)' : 'var(--text-secondary)',
+                      padding: '5px 10px', borderRadius: '6px', fontSize: '0.7rem',
+                      fontFamily: "'JetBrains Mono', monospace", cursor: 'pointer'
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Part 2: Network Scanner & Discovered ESP32 Devices */}
+            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div>
+                  <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#f8fafc' }}>
+                    Network Scan & Discovered ESP32s
+                  </h3>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                    Scan Wi-Fi subnet for active MQTT / HTTP transmitters
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleScanDevices}
+                  disabled={isScanning}
+                  style={{
+                    padding: '8px 14px', background: 'rgba(56, 189, 248, 0.15)',
+                    border: '1px solid rgba(56, 189, 248, 0.35)', borderRadius: '8px',
+                    color: '#38bdf8', fontSize: '0.75rem', fontWeight: 600,
+                    cursor: isScanning ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
+                  }}
+                >
+                  <RefreshCw size={13} style={{ animation: isScanning ? 'spin 1s linear infinite' : 'none' }} />
+                  {isScanning ? 'Scanning Subnet...' : 'Scan Network'}
+                </button>
+              </div>
+
+              {/* Discovered Device Cards List */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {discoveredDevices.map((dev) => {
+                  const isSelected = telemetry.device_ip === dev.ip;
+                  return (
+                    <div
+                      key={dev.ip}
+                      onClick={() => handleSelectDevice(dev.ip, dev.name)}
+                      style={{
+                        padding: '12px 14px',
+                        background: isSelected ? 'rgba(0, 245, 160, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+                        border: isSelected ? '1px solid rgba(0, 245, 160, 0.4)' : '1px solid var(--border-subtle)',
+                        borderRadius: '10px', display: 'flex', justifyContent: 'space-between',
+                        alignItems: 'center', cursor: 'pointer', transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{
+                          width: '32px', height: '32px', borderRadius: '8px',
+                          background: isSelected ? 'rgba(0, 245, 160, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}>
+                          <Cpu size={16} color={isSelected ? 'var(--color-safe)' : '#94a3b8'} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#f8fafc' }}>
+                            {dev.name}
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace", display: 'flex', gap: '8px', marginTop: '2px' }}>
+                            <span>IP: <strong style={{ color: '#cbd5e1' }}>{dev.ip}</strong></span>
+                            {dev.signal && <span>• Signal: {dev.signal}</span>}
+                            {dev.type && <span>• {dev.type}</span>}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {isSelected ? (
+                          <span style={{
+                            padding: '4px 10px', borderRadius: '6px',
+                            background: 'rgba(0, 245, 160, 0.2)', color: 'var(--color-safe)',
+                            fontSize: '0.7rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px'
+                          }}>
+                            <CheckCircle2 size={12} /> ACTIVE LINK
+                          </span>
+                        ) : (
+                          <span style={{
+                            padding: '4px 10px', borderRadius: '6px',
+                            background: 'rgba(255, 255, 255, 0.06)', color: 'var(--text-secondary)',
+                            fontSize: '0.7rem', fontWeight: 600
+                          }}>
+                            Choose & Connect
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ marginTop: '20px', paddingTop: '14px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setShowDeviceModal(false)}
+                style={{
+                  padding: '8px 18px', background: 'transparent',
+                  border: '1px solid var(--border-light)', borderRadius: '8px',
+                  color: 'var(--text-secondary)', fontSize: '0.8rem', cursor: 'pointer'
+                }}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

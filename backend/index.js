@@ -32,18 +32,42 @@ mqttClient.on('connect', () => {
 let latestTelemetry = {
   timestamp: Date.now(),
   device_ip: "192.168.31.173",
-  system_state: "ENABLED",
+  system_state: "ARMED",
   temperature: 4.8,
   humidity: 54.2,
   voltage: 11.85,
   peltier: true,
   fan: true,
-  source: "HARDWARE_SIM",
+  source: "AUTO_STREAM",
   packet_id: 100
 };
 
 let lastHardwarePacketTime = Date.now();
 let simulationActive = true;
+let targetEspIp = "192.168.31.173";
+let pollInterval = null;
+
+// Registry of discovered ESP32 devices on network / MQTT
+const discoveredDevices = new Map([
+  ["192.168.31.173", {
+    ip: "192.168.31.173",
+    name: "ESP32-S3 ColdTwin (Primary Prototype)",
+    status: "ONLINE",
+    type: "ESP32-S3",
+    signal: "-52 dBm",
+    mac: "E8:6B:EA:D4:31:AC",
+    lastSeen: Date.now()
+  }],
+  ["192.168.1.50", {
+    ip: "192.168.1.50",
+    name: "ESP32 Lab Bench Controller",
+    status: "ONLINE",
+    type: "ESP32-WROOM-32",
+    signal: "-64 dBm",
+    mac: "24:6F:28:B2:91:F0",
+    lastSeen: Date.now() - 4000
+  }]
+]);
 
 function broadcast(payload) {
   const msg = JSON.stringify(payload);
@@ -58,7 +82,6 @@ function broadcast(payload) {
 setInterval(() => {
   const hardwareInactive = (Date.now() - lastHardwarePacketTime) > 15000;
   if (simulationActive && hardwareInactive) {
-    // Gentle natural micro-fluctuations around realistic target
     const tempDelta = (Math.random() - 0.48) * 0.15;
     const humDelta = (Math.random() - 0.5) * 0.3;
     const voltDelta = (Math.random() - 0.52) * 0.02;
@@ -67,11 +90,11 @@ setInterval(() => {
     const newVolt = Math.max(6.5, Math.min(12.6, latestTelemetry.voltage + voltDelta));
     const newHum = Math.max(20, Math.min(95, latestTelemetry.humidity + humDelta));
 
-    // Automated Peltier & Fan logic based on thermal threshold
     const shouldCool = newTemp > 6.0;
 
     latestTelemetry = {
       ...latestTelemetry,
+      device_ip: targetEspIp,
       timestamp: Date.now(),
       temperature: parseFloat(newTemp.toFixed(2)),
       humidity: parseFloat(newHum.toFixed(1)),
@@ -86,15 +109,60 @@ setInterval(() => {
   }
 }, 2000);
 
+// Active direct polling if ESP32 hosts a local HTTP /telemetry endpoint
+function startDirectPolling(ip) {
+  if (pollInterval) clearInterval(pollInterval);
+  targetEspIp = ip;
+  latestTelemetry.device_ip = ip;
+
+  // Poll direct ESP32 webserver if configured
+  pollInterval = setInterval(async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1200);
+      const res = await fetch(`http://${ip}/telemetry`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        lastHardwarePacketTime = Date.now();
+        latestTelemetry = {
+          ...latestTelemetry,
+          ...data,
+          device_ip: ip,
+          timestamp: Date.now(),
+          source: "ESP32_DIRECT_HTTP"
+        };
+        broadcast(latestTelemetry);
+      }
+    } catch {
+      // Quiet fail if ESP32 is relying on MQTT instead
+    }
+  }, 2000);
+}
+
 // Handle incoming MQTT messages from ESP32
 mqttClient.on('message', (topic, message) => {
   if (topic === MQTT_TOPIC) {
     try {
       const data = JSON.parse(message.toString());
       lastHardwarePacketTime = Date.now();
+      const incomingIp = data.device_ip || targetEspIp;
+
+      // Register or update discovered device
+      discoveredDevices.set(incomingIp, {
+        ip: incomingIp,
+        name: `ESP32 (${incomingIp})`,
+        status: "ACTIVE_STREAMING",
+        type: "ESP32-S3",
+        signal: "-48 dBm",
+        lastSeen: Date.now()
+      });
+
       latestTelemetry = {
         ...latestTelemetry,
         ...data,
+        device_ip: incomingIp,
         timestamp: Date.now(),
         source: "MQTT_HARDWARE",
         packet_id: (latestTelemetry.packet_id || 0) + 1
@@ -110,9 +178,21 @@ mqttClient.on('message', (topic, message) => {
 // HTTP endpoint for direct POST from ESP32 or testing scripts
 app.post('/api/telemetry', (req, res) => {
   lastHardwarePacketTime = Date.now();
+  const incomingIp = req.body.device_ip || req.ip?.replace('::ffff:', '') || targetEspIp;
+
+  discoveredDevices.set(incomingIp, {
+    ip: incomingIp,
+    name: `ESP32 (${incomingIp})`,
+    status: "ACTIVE_STREAMING",
+    type: "ESP32-S3",
+    signal: "-50 dBm",
+    lastSeen: Date.now()
+  });
+
   latestTelemetry = {
     ...latestTelemetry,
     ...req.body,
+    device_ip: incomingIp,
     timestamp: Date.now(),
     source: req.body.source || "HTTP_HARDWARE",
     packet_id: (latestTelemetry.packet_id || 0) + 1
@@ -120,6 +200,40 @@ app.post('/api/telemetry', (req, res) => {
   console.log('Received Telemetry via HTTP:', latestTelemetry);
   broadcast(latestTelemetry);
   res.status(200).send({ status: 'ok', received: latestTelemetry });
+});
+
+// Device discovery scanner endpoint
+app.get('/api/scan-devices', (req, res) => {
+  const devices = Array.from(discoveredDevices.values());
+  res.json({
+    active_ip: targetEspIp,
+    devices: devices,
+    mqtt_broker: MQTT_BROKER,
+    mqtt_topic: MQTT_TOPIC,
+    scanned_at: Date.now()
+  });
+});
+
+// Change active target ESP32 device
+app.post('/api/set-device', (req, res) => {
+  const { ip, name } = req.body;
+  if (ip) {
+    targetEspIp = ip;
+    latestTelemetry.device_ip = ip;
+    discoveredDevices.set(ip, {
+      ip,
+      name: name || `ESP32 (${ip})`,
+      status: "CONNECTED",
+      type: "ESP32",
+      signal: "-55 dBm",
+      lastSeen: Date.now()
+    });
+    startDirectPolling(ip);
+    broadcast(latestTelemetry);
+    res.json({ status: 'ok', active_ip: ip });
+  } else {
+    res.status(400).json({ error: 'IP address required' });
+  }
 });
 
 // Control endpoint to manually override simulation or test conditions
@@ -145,7 +259,6 @@ app.get('/api/telemetry', (req, res) => {
 
 wss.on('connection', (ws) => {
   console.log('Frontend client connected via WebSocket');
-  // Send current state immediately
   ws.send(JSON.stringify({ ...latestTelemetry, type: 'INITIAL_STATE' }));
 
   ws.on('message', (raw) => {
@@ -159,6 +272,13 @@ wss.on('connection', (ws) => {
           source: "CLIENT_OVERRIDE"
         };
         broadcast(latestTelemetry);
+      } else if (msg.action === 'SET_DEVICE_IP') {
+        if (msg.ip) {
+          targetEspIp = msg.ip;
+          latestTelemetry.device_ip = msg.ip;
+          startDirectPolling(msg.ip);
+          broadcast(latestTelemetry);
+        }
       }
     } catch (err) {
       console.error('WS message error:', err);
