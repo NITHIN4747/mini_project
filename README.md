@@ -1,6 +1,6 @@
 # ColdChain Twin — Real-Time Predictive Digital Twin for Off-Grid Vaccine Transport
 
-> **A real-time 3D cyber-physical digital twin for solar-buffered, temperature-critical last-mile vaccine and medicine logistics.**
+> **A real-time 3D cyber-physical digital twin for battery-buffered, temperature-critical last-mile vaccine and medicine logistics.**
 
 [![GitHub Pages](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-00f5a0?style=for-the-badge&logo=github)](https://nithin4747.github.io/mini_project/)
 [![React](https://img.shields.io/badge/React%2019-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
@@ -16,7 +16,7 @@ In off-grid rural communities across developing regions (parts of India, Southea
 
 Conventional data loggers only alert doctors **after** the vaccines have suffered thermal degradation. 
 
-**ColdChain Twin** is an active, predictive decision tool that combines live solar irradiance telemetry, battery voltage curves, and ambient thermal physics to estimate safe cooling runway **before** the healthcare worker departs.
+**ColdChain Twin** is an active, predictive decision tool that combines live battery voltage curves, ambient sensor telemetry, and thermal physics to estimate safe cooling runway **before** the healthcare worker departs.
 
 * **Target Range**: Strict WHO PQS compliance ($+2.0^\circ\text{C}$ to $+8.0^\circ\text{C}$).
 * **Active Cooling**: TEC1-12706 solid-state thermoelectric Peltier heat pump.
@@ -91,7 +91,7 @@ The dashboard includes an interactive **What-If Stress Lab** allowing engineers 
 * **Safe Transit ($4.2^\circ\text{C}$)**: Standard WHO-compliant route.
 * **Heatwave Spike ($38.5^\circ\text{C}$)**: Ambient temperature spike triggering 100% Peltier power & 3,200 RPM turbo exhaust fan.
 * **Sub-Zero Freezing ($1.2^\circ\text{C}$)**: Alerts against vaccine denaturation due to overcooling.
-* **Low Solar ($6.7\text{V}$)**: Depleted battery / overcast sky testing.
+* **Low Battery ($6.7\text{V}$)**: Depleted battery testing.
 
 ---
 

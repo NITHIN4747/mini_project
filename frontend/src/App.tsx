@@ -12,7 +12,6 @@ import {
   Info, 
   ShieldCheck, 
   AlertTriangle, 
-  Sun,
   X
 } from 'lucide-react'
 import TwinScene, { type Telemetry } from './components/TwinScene'
@@ -392,7 +391,7 @@ export default function App() {
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
             <span>Bus Voltage: <strong className="mono-metric" style={{ color: '#fff' }}>{telemetry.voltage.toFixed(2)}V</strong></span>
             <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#38bdf8' }}>
-              <Sun size={12} /> Solar Buffer: 12W
+              <Zap size={12} /> DC Supply: 12V
             </span>
           </div>
         </div>
@@ -551,7 +550,7 @@ export default function App() {
                 fontSize: '0.65rem', fontWeight: 600, cursor: 'pointer', textAlign: 'left'
               }}
             >
-              ⚡ Low Solar (6.7V)
+              ⚡ Low Battery (6.7V)
             </button>
           </div>
 
@@ -574,7 +573,7 @@ export default function App() {
 
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', marginBottom: '4px' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Battery / Solar Voltage</span>
+                <span style={{ color: 'var(--text-secondary)' }}>Battery Bus Voltage</span>
                 <span className="mono-metric" style={{ color: '#fff', fontWeight: 700 }}>{simVolt.toFixed(2)} V</span>
               </div>
               <input 
@@ -665,7 +664,7 @@ export default function App() {
                 Why a Predictive Digital Twin?
               </div>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                Standard data loggers only inform a doctor <em>after</em> vaccines have spoiled. This digital twin combines solar irradiance telemetry, LiFePO4 battery degradation curves, and ambient thermal modeling to predict safe delivery runway <strong>before</strong> the health worker departs.
+                Standard data loggers only inform a doctor <em>after</em> vaccines have spoiled. This digital twin combines battery discharge curves, ambient sensor telemetry, and thermoelectric modeling to predict safe delivery runway <strong>before</strong> the health worker departs.
               </p>
             </div>
 
